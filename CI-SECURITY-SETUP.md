@@ -24,6 +24,9 @@ name: Security Checks
 # All checks are ADVISORY (non-blocking) by default.
 # They report findings as warnings in the PR, but do NOT prevent merging.
 # To make any check blocking, remove its "continue-on-error: true" line.
+#
+# All results are written to BOTH stdout (for CLI/agent visibility via
+# `gh run view --log`) AND $GITHUB_STEP_SUMMARY (for the web UI).
 
 on:
   pull_request:
@@ -47,11 +50,12 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "## Secret Scanning Results" >> $GITHUB_STEP_SUMMARY
+          report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
+          report "## Secret Scanning Results"
           if [ "${{ steps.gitleaks.outcome }}" = "success" ]; then
-            echo "✅ No secrets detected" >> $GITHUB_STEP_SUMMARY
+            report "✅ No secrets detected"
           else
-            echo "⚠️ Potential secrets found — review gitleaks output above" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Potential secrets found — review gitleaks output above"
           fi
 
   dependency-audit:
@@ -65,7 +69,8 @@ jobs:
           node-version: 20
       - name: Detect package manager and audit
         run: |
-          echo "## Dependency Audit Results" >> $GITHUB_STEP_SUMMARY
+          report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
+          report "## Dependency Audit Results"
           if [ -f "pnpm-lock.yaml" ]; then
             npm install -g pnpm
             pnpm install --frozen-lockfile
@@ -77,15 +82,15 @@ jobs:
             npm ci
             npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
           else
-            echo "⚠️ No lockfile found — skipping dependency audit" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ No lockfile found — skipping dependency audit"
             exit 0
           fi
           if grep -qiE "found 0 vulnerabilities|0 vulnerabilities found" audit-output.txt; then
-            echo "✅ No high/critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+            report "✅ No high/critical vulnerabilities found"
           else
-            echo "⚠️ Vulnerabilities found — review details below" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Vulnerabilities found — review details below"
             echo '```' >> $GITHUB_STEP_SUMMARY
-            cat audit-output.txt >> $GITHUB_STEP_SUMMARY
+            cat audit-output.txt | tee -a $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -99,16 +104,17 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run Semgrep
         run: |
+          report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
           semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>/dev/null || true
           FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "PARSE_ERROR")
-          echo "## Semgrep Results" >> $GITHUB_STEP_SUMMARY
+          report "## Semgrep Results"
           if [ "$FINDINGS" = "PARSE_ERROR" ]; then
-            echo "⚠️ Semgrep scan or result parsing failed — review manually" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Semgrep scan or result parsing failed — review manually"
           elif [ "$FINDINGS" = "0" ]; then
-            echo "✅ No security findings" >> $GITHUB_STEP_SUMMARY
+            report "✅ No security findings"
           else
-            echo "⚠️ Found $FINDINGS security issue(s) — review in PR checks" >> $GITHUB_STEP_SUMMARY
-            semgrep scan --config auto --severity ERROR --severity WARNING 2>&1 | tail -50 >> $GITHUB_STEP_SUMMARY || true
+            report "⚠️ Found $FINDINGS security issue(s) — review in PR checks"
+            semgrep scan --config auto --severity ERROR --severity WARNING 2>&1 | tail -50 | tee -a $GITHUB_STEP_SUMMARY || true
           fi
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
@@ -122,45 +128,44 @@ jobs:
 
       - name: Security environment checks
         run: |
-          echo "## Environment Safety" >> $GITHUB_STEP_SUMMARY
+          report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
+          report "## Environment Safety"
           ISSUES=0
 
           # Check for .env files
           ENVFILES=$(find . -name '.env' -o -name '.env.local' -o -name '.env.production' | grep -v node_modules | grep -v .env.example || true)
           if [ -n "$ENVFILES" ]; then
-            echo "⚠️ **Found .env files that should not be committed:**" >> $GITHUB_STEP_SUMMARY
-            echo "$ENVFILES" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Found .env files that should not be committed:"
+            echo "$ENVFILES" | tee -a $GITHUB_STEP_SUMMARY
             ISSUES=$((ISSUES+1))
           fi
 
           # Check for service_role in app code
           MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations | grep -v '\.test\.' | grep -v "__tests__" || true)
           if [ -n "$MATCHES" ]; then
-            echo "⚠️ **Found service_role references in application code:**" >> $GITHUB_STEP_SUMMARY
-            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Found service_role references in application code:"
+            echo "$MATCHES" | tee -a $GITHUB_STEP_SUMMARY
             ISSUES=$((ISSUES+1))
           fi
 
           # Check for NEXT_PUBLIC_ secrets
           MATCHES=$(grep -rn "NEXT_PUBLIC_.*SECRET\|NEXT_PUBLIC_.*KEY.*SERVICE\|NEXT_PUBLIC_.*PASSWORD\|NEXT_PUBLIC_.*TOKEN" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.env*" . | grep -v node_modules || true)
           if [ -n "$MATCHES" ]; then
-            echo "⚠️ **Found potential secrets with NEXT_PUBLIC_ prefix:**" >> $GITHUB_STEP_SUMMARY
-            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            report "⚠️ Found potential secrets with NEXT_PUBLIC_ prefix:"
+            echo "$MATCHES" | tee -a $GITHUB_STEP_SUMMARY
             ISSUES=$((ISSUES+1))
           fi
 
           # Check for error message leakage in API responses
           MATCHES=$(grep -rn "error\.message\|error\.stack\|err\.message\|err\.stack" --include="*.ts" --include="*.tsx" --include="*.js" . | grep -v node_modules | grep -v "console\.\|logger\.\|log\.\|\/\/" || true)
           if [ -n "$MATCHES" ]; then
-            echo "⚠️ **API responses may leak error details to clients:**" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            report "⚠️ API responses may leak error details to clients:"
+            echo "$MATCHES" | tee -a $GITHUB_STEP_SUMMARY
             ISSUES=$((ISSUES+1))
           fi
 
           if [ $ISSUES -eq 0 ]; then
-            echo "✅ All environment checks passed" >> $GITHUB_STEP_SUMMARY
+            report "✅ All environment checks passed"
           fi
 ```
 

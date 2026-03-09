@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "code-security": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "computedHash": "c5cb183448b83f05560a048a9700c3754d16d50e9e7ba368467039dc07177449"
+    },
+    "llm-security": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "computedHash": "27fa571b75861545226c9ee3d861fda4831cbf10099bf34118d59470dffb0fc8"
+    },
+    "semgrep": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "computedHash": "2ea1b9502a5cebbc74b5791dcabac00090bb00fc9a67d87a54bbd895c74a1cd6"
+    }
+  }
+}

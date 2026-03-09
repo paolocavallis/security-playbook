@@ -1,0 +1,133 @@
+name: Security Checks
+
+# Runs on every PR and push to main.
+# All checks are ADVISORY (non-blocking) by default.
+# They report findings as warnings in the PR, but do NOT prevent merging.
+# To make any check blocking, remove its "continue-on-error: true" line.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  secrets-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Detect package manager and audit
+        run: |
+          echo "## Dependency Audit Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f "pnpm-lock.yaml" ]; then
+            npm install -g pnpm
+            pnpm install --frozen-lockfile
+            pnpm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          elif [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+            yarn audit --level high 2>&1 | tee audit-output.txt || true
+          elif [ -f "package-lock.json" ]; then
+            npm ci
+            npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          else
+            echo "⚠️ No lockfile found — skipping dependency audit" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          if grep -qiE "found 0 vulnerabilities|0 vulnerabilities found" audit-output.txt; then
+            echo "✅ No high/critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Vulnerabilities found — review details below" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat audit-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+  semgrep:
+    name: Semgrep Static Analysis
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run Semgrep
+        run: |
+          semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>&1 || true
+          FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "0")
+          echo "## Semgrep Results" >> $GITHUB_STEP_SUMMARY
+          if [ "$FINDINGS" = "0" ]; then
+            echo "✅ No security findings" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Found $FINDINGS security issue(s) — review in PR checks" >> $GITHUB_STEP_SUMMARY
+            semgrep scan --config auto --severity ERROR --severity WARNING 2>&1 | tail -50 >> $GITHUB_STEP_SUMMARY || true
+          fi
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  env-check:
+    name: Environment Safety
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Security environment checks
+        run: |
+          echo "## Environment Safety" >> $GITHUB_STEP_SUMMARY
+          ISSUES=0
+
+          # Check for .env files
+          ENVFILES=$(find . -name '.env' -o -name '.env.local' -o -name '.env.production' | grep -v node_modules | grep -v .env.example || true)
+          if [ -n "$ENVFILES" ]; then
+            echo "⚠️ **Found .env files that should not be committed:**" >> $GITHUB_STEP_SUMMARY
+            echo "$ENVFILES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          # Check for service_role in app code
+          MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations | grep -v "*.test.*" | grep -v "__tests__" || true)
+          if [ -n "$MATCHES" ]; then
+            echo "⚠️ **Found service_role references in application code:**" >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          # Check for NEXT_PUBLIC_ secrets
+          MATCHES=$(grep -rn "NEXT_PUBLIC_.*SECRET\|NEXT_PUBLIC_.*KEY.*SERVICE\|NEXT_PUBLIC_.*PASSWORD\|NEXT_PUBLIC_.*TOKEN" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.env*" . | grep -v node_modules || true)
+          if [ -n "$MATCHES" ]; then
+            echo "⚠️ **Found potential secrets with NEXT_PUBLIC_ prefix:**" >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          # Check for error message leakage in API responses
+          # Looks for error.message/error.stack in API route files (not in logging statements)
+          MATCHES=$(grep -rn "error\.message\|error\.stack\|err\.message\|err\.stack" --include="*.ts" --include="*.tsx" --include="*.js" . | grep -v node_modules | grep -v "console\.\|logger\.\|log\.\|\/\/" || true)
+          if [ -n "$MATCHES" ]; then
+            echo "⚠️ **API responses may leak error details to clients:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if [ $ISSUES -eq 0 ]; then
+            echo "✅ All environment checks passed" >> $GITHUB_STEP_SUMMARY
+          fi

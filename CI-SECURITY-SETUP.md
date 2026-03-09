@@ -77,6 +77,9 @@ jobs:
         run: |
           report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
           report "## Dependency Audit Results"
+          # --ignore-scripts is safe here: we only install to run `audit`, not to build.
+          # Do NOT copy --ignore-scripts into build/deploy workflows — packages like
+          # prisma, sharp, and bcrypt need postinstall scripts to function.
           if [ -f "pnpm-lock.yaml" ]; then
             npm install -g pnpm
             pnpm install --frozen-lockfile --ignore-scripts
@@ -87,6 +90,10 @@ jobs:
           elif [ -f "package-lock.json" ]; then
             npm ci --ignore-scripts
             npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          elif [ -f "bun.lockb" ] || [ -f "bun.lock" ]; then
+            report "ℹ️ Bun lockfile detected — \`bun audit\` is not yet available."
+            report "Consider adding a package-lock.json for audit coverage, or run \`npx auditjs ossi\` locally."
+            exit 0
           else
             report "⚠️ No lockfile found — skipping dependency audit"
             exit 0
@@ -98,6 +105,12 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
             cat audit-output.txt | tee -a $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          # Monorepo: warn about lockfiles in subdirectories (not audited by this job)
+          SUB_LOCKFILES=$(find . -mindepth 2 \( -name 'pnpm-lock.yaml' -o -name 'yarn.lock' -o -name 'package-lock.json' -o -name 'bun.lockb' -o -name 'bun.lock' \) | grep -v node_modules | head -20 || true)
+          if [ -n "$SUB_LOCKFILES" ]; then
+            report "ℹ️ Additional lockfiles in subdirectories (not audited — only root is checked):"
+            echo "$SUB_LOCKFILES" | tee -a $GITHUB_STEP_SUMMARY
           fi
 
   semgrep:
@@ -184,7 +197,7 @@ jobs:
 | Job | What It Catches | Blocks PR? |
 |-----|----------------|------------|
 | `secrets-scan` | API keys, tokens, passwords in code or git history | No (warning) |
-| `dependency-audit` | Known CVEs in npm packages (high/critical) — auto-detects pnpm/yarn/npm | No (warning) |
+| `dependency-audit` | Known CVEs in npm packages (high/critical) — auto-detects pnpm/yarn/npm/bun, warns about monorepo sub-lockfiles | No (warning) |
 | `semgrep` | OWASP Top 10 vulnerabilities, insecure patterns | No (warning) |
 | `env-check` | Committed .env files, service_role in app code, NEXT_PUBLIC_ secrets, error.message leakage | No (warning) |
 
@@ -331,3 +344,52 @@ OPTIONAL (when ready to enforce):
 | "Don't push directly to main" | Branch protection makes it impossible (when enabled) |
 
 The shift: **security is no longer dependent on human memory. It's infrastructure.**
+
+---
+
+## Team Rollout Decisions
+
+Before rolling this out across your team, resolve these questions. There are no universal right answers — they depend on your team's workflow and risk tolerance.
+
+### 1. Should any check be blocking?
+
+All checks default to advisory (`continue-on-error: true`). When confidence is high, consider making specific checks blocking by removing that line. Start with `secrets-scan` — false positives are rare and the blast radius of a leaked secret is high.
+
+### 2. How do we suppress false positives?
+
+The `env-check` job will flag legitimate uses of `service_role` (admin API routes) and `error.message` (error boundaries, throw statements). Decide on a suppression mechanism:
+- **Inline comments**: `// security-ignore: service_role used in admin-only server route`
+- **Path exclusions**: Add directories to the grep `--exclude-dir` list
+- **`.securityignore` file**: List paths/patterns to skip (requires custom script changes)
+
+### 3. Who owns Semgrep container digest updates?
+
+The Semgrep container is pinned to a SHA256 digest for supply chain safety. Dependabot does NOT auto-update container image digests. Options:
+- Assign a team member to check quarterly
+- Add a [Renovate](https://docs.renovatebot.com/) rule for Docker digest updates
+- Accept the trade-off: pinned = more secure but may miss Semgrep rule updates
+
+### 4. Do we run on fork PRs?
+
+The workflow runs on `pull_request`, which includes forks. `GITHUB_TOKEN` has read-only access for fork PRs, but any secrets explicitly referenced (like `SEMGREP_APP_TOKEN`) will **not** be available to fork PRs by default. This is safe. If you add write-scoped secrets to this workflow, review GitHub's [security hardening guide](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions).
+
+### 5. Monorepo audit coverage
+
+The dependency audit only checks the root lockfile. If your project has lockfiles in subdirectories (`apps/web/package-lock.json`, `packages/api/yarn.lock`), they will be reported as warnings but **not audited**. Options:
+- Use a single root lockfile (recommended for pnpm workspaces)
+- Add a matrix strategy to audit each lockfile location
+- Accept root-only coverage and audit subdirectories manually
+
+### 6. Bun support
+
+Bun does not yet have a `bun audit` command. The workflow detects `bun.lockb`/`bun.lock` and reports a warning. If your team uses Bun:
+- Generate a parallel `package-lock.json` for audit coverage (`bun install` + `npm install --package-lock-only`)
+- Or run `npx auditjs ossi` locally until Bun adds native audit support
+
+### 7. Do we need a canary test repo?
+
+A test repo with intentional security issues (committed `.env`, `error.message` in a route, `service_role` in app code) lets you verify the full warning pipeline works end-to-end. This playbook was validated with PRs #4 and #5 against [security-playbook-test](https://github.com/paolocavallis/security-playbook-test). Consider maintaining one for your team.
+
+### 8. What about `--ignore-scripts` in build workflows?
+
+The CI workflow uses `--ignore-scripts` because it only needs installed packages to run `audit` — it never builds your app. **Do not copy this flag into build/deploy workflows.** Packages like `prisma`, `sharp`, `bcrypt`, and `esbuild` require postinstall scripts to function. The comment in the generated YAML explains this.

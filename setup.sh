@@ -119,6 +119,9 @@ jobs:
         run: |
           report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
           report "## Dependency Audit Results"
+          # --ignore-scripts is safe here: we only install to run `audit`, not to build.
+          # Do NOT copy --ignore-scripts into build/deploy workflows — packages like
+          # prisma, sharp, and bcrypt need postinstall scripts to function.
           if [ -f "pnpm-lock.yaml" ]; then
             npm install -g pnpm
             pnpm install --frozen-lockfile --ignore-scripts
@@ -129,6 +132,10 @@ jobs:
           elif [ -f "package-lock.json" ]; then
             npm ci --ignore-scripts
             npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          elif [ -f "bun.lockb" ] || [ -f "bun.lock" ]; then
+            report "ℹ️ Bun lockfile detected — \`bun audit\` is not yet available."
+            report "Consider adding a package-lock.json for audit coverage, or run \`npx auditjs ossi\` locally."
+            exit 0
           else
             report "⚠️ No lockfile found — skipping dependency audit"
             exit 0
@@ -140,6 +147,12 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
             cat audit-output.txt | tee -a $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          # Monorepo: warn about lockfiles in subdirectories (not audited by this job)
+          SUB_LOCKFILES=$(find . -mindepth 2 \( -name 'pnpm-lock.yaml' -o -name 'yarn.lock' -o -name 'package-lock.json' -o -name 'bun.lockb' -o -name 'bun.lock' \) | grep -v node_modules | head -20 || true)
+          if [ -n "$SUB_LOCKFILES" ]; then
+            report "ℹ️ Additional lockfiles in subdirectories (not audited — only root is checked):"
+            echo "$SUB_LOCKFILES" | tee -a $GITHUB_STEP_SUMMARY
           fi
 
   semgrep:

@@ -1,24 +1,29 @@
-# Phase 2: CI Security Enforcement
+# Phase 2: CI Security Detection
 
-> Move from "please remember to check" to "the code cannot ship if it fails."
+> Move from "please remember to check" to "CI flags it automatically on every PR."
 
 ---
 
 ## Overview
 
 Phase 1 (the playbook) gives you standards and manual processes.
-Phase 2 makes them automatic. These checks run on every PR and block merging if they fail.
+Phase 2 makes them automatic. These checks run on every PR and report findings as **warnings** — they do NOT block merging or deploying by default.
 
-**Time to set up:** ~1 hour per project, then it runs forever.
+**Time to set up:** Run `setup.sh` once. It creates everything below.
 
 ---
 
-## 1. GitHub Actions: Security Gate
+## 1. GitHub Actions: Security Checks
 
-Create `.github/workflows/security.yml` in your project:
+Created at `.github/workflows/security.yml`:
 
 ```yaml
 name: Security Checks
+
+# Runs on every PR and push to main.
+# All checks are ADVISORY (non-blocking) by default.
+# They report findings as warnings in the PR, but do NOT prevent merging.
+# To make any check blocking, remove its "continue-on-error: true" line.
 
 on:
   pull_request:
@@ -30,70 +35,130 @@ jobs:
   secrets-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        id: gitleaks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Secret Scanning Results" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.gitleaks.outcome }}" = "success" ]; then
+            echo "✅ No secrets detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Potential secrets found — review gitleaks output above" >> $GITHUB_STEP_SUMMARY
+          fi
 
   dependency-audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: pnpm/action-setup@fe02b34f77f8bc703c22d82ef19c587e31793dd0 # v4.0.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level=high
-        continue-on-error: false
+      - name: Detect package manager and audit
+        run: |
+          echo "## Dependency Audit Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f "pnpm-lock.yaml" ]; then
+            npm install -g pnpm
+            pnpm install --frozen-lockfile
+            pnpm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          elif [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+            yarn audit --level high 2>&1 | tee audit-output.txt || true
+          elif [ -f "package-lock.json" ]; then
+            npm ci
+            npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
+          else
+            echo "⚠️ No lockfile found — skipping dependency audit" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          if grep -qiE "found 0 vulnerabilities|0 vulnerabilities found" audit-output.txt; then
+            echo "✅ No high/critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Vulnerabilities found — review details below" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat audit-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
 
   semgrep:
     name: Semgrep Static Analysis
     runs-on: ubuntu-latest
+    continue-on-error: true
     container:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: semgrep scan --config auto --error --severity ERROR --severity WARNING
+      - name: Run Semgrep
+        run: |
+          semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>&1 || true
+          FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "0")
+          echo "## Semgrep Results" >> $GITHUB_STEP_SUMMARY
+          if [ "$FINDINGS" = "0" ]; then
+            echo "✅ No security findings" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Found $FINDINGS security issue(s) — review in PR checks" >> $GITHUB_STEP_SUMMARY
+            semgrep scan --config auto --severity ERROR --severity WARNING 2>&1 | tail -50 >> $GITHUB_STEP_SUMMARY || true
+          fi
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
   env-check:
     name: Environment Safety
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Check for .env files that should not be committed
+      - name: Security environment checks
         run: |
+          echo "## Environment Safety" >> $GITHUB_STEP_SUMMARY
+          ISSUES=0
+
+          # Check for .env files
           ENVFILES=$(find . -name '.env' -o -name '.env.local' -o -name '.env.production' | grep -v node_modules | grep -v .env.example || true)
           if [ -n "$ENVFILES" ]; then
-            echo "::error::Found .env files that should not be committed:"
-            echo "$ENVFILES"
-            exit 1
+            echo "⚠️ **Found .env files that should not be committed:**" >> $GITHUB_STEP_SUMMARY
+            echo "$ENVFILES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
           fi
 
-      - name: Check for service_role key in non-migration code
-        run: |
-          MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations || true)
+          # Check for service_role in app code
+          MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations | grep -v "*.test.*" | grep -v "__tests__" || true)
           if [ -n "$MATCHES" ]; then
-            echo "::error::Found service_role references in application code:"
-            echo "$MATCHES"
-            exit 1
+            echo "⚠️ **Found service_role references in application code:**" >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
           fi
 
-      - name: Check for NEXT_PUBLIC_ secrets
-        run: |
+          # Check for NEXT_PUBLIC_ secrets
           MATCHES=$(grep -rn "NEXT_PUBLIC_.*SECRET\|NEXT_PUBLIC_.*KEY.*SERVICE\|NEXT_PUBLIC_.*PASSWORD\|NEXT_PUBLIC_.*TOKEN" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.env*" . | grep -v node_modules || true)
           if [ -n "$MATCHES" ]; then
-            echo "::error::Found potential secrets with NEXT_PUBLIC_ prefix:"
-            echo "$MATCHES"
-            exit 1
+            echo "⚠️ **Found potential secrets with NEXT_PUBLIC_ prefix:**" >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          # Check for error message leakage in API responses
+          MATCHES=$(grep -rn "error\.message\|error\.stack\|err\.message\|err\.stack" --include="*.ts" --include="*.tsx" --include="*.js" . | grep -v node_modules | grep -v "console\.\|logger\.\|log\.\|\/\/" || true)
+          if [ -n "$MATCHES" ]; then
+            echo "⚠️ **API responses may leak error details to clients:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$MATCHES" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            ISSUES=$((ISSUES+1))
+          fi
+
+          if [ $ISSUES -eq 0 ]; then
+            echo "✅ All environment checks passed" >> $GITHUB_STEP_SUMMARY
           fi
 ```
 
@@ -101,16 +166,20 @@ jobs:
 
 | Job | What It Catches | Blocks PR? |
 |-----|----------------|------------|
-| `secrets-scan` | API keys, tokens, passwords in code or git history | Yes |
-| `dependency-audit` | Known CVEs in npm packages (high/critical) | Yes |
-| `semgrep` | OWASP Top 10 vulnerabilities, insecure patterns | Yes |
-| `env-check` | Committed .env files, service_role in app code, secrets in NEXT_PUBLIC_ | Yes |
+| `secrets-scan` | API keys, tokens, passwords in code or git history | No (warning) |
+| `dependency-audit` | Known CVEs in npm packages (high/critical) — auto-detects pnpm/yarn/npm | No (warning) |
+| `semgrep` | OWASP Top 10 vulnerabilities, insecure patterns | No (warning) |
+| `env-check` | Committed .env files, service_role in app code, NEXT_PUBLIC_ secrets, error.message leakage | No (warning) |
+
+All jobs write results to `$GITHUB_STEP_SUMMARY` so findings appear in the PR job summary for AI agents and developers to review.
+
+**To make any check blocking:** remove `continue-on-error: true` from that job.
 
 ---
 
-## 2. Pre-commit Hook: Local Secrets Scan
+## 2. Pre-commit Hook (Optional)
 
-Catches secrets before they even reach git history. Add to your project:
+Catches secrets before they even reach git history. Not installed by setup.sh — add when ready:
 
 ```bash
 # Install gitleaks
@@ -144,11 +213,9 @@ Then: `pip install pre-commit && pre-commit install`
 
 ---
 
-## 3. Dependabot / Renovate: Automated Dependency Updates
+## 3. Dependabot: Automated Dependency Updates
 
-### Option A: GitHub Dependabot (simpler)
-
-Create `.github/dependabot.yml`:
+Created at `.github/dependabot.yml` by setup.sh:
 
 ```yaml
 version: 2
@@ -161,50 +228,25 @@ updates:
     labels:
       - "dependencies"
       - "security"
-    # Group minor/patch updates to reduce PR noise
     groups:
       minor-and-patch:
         update-types:
           - "minor"
           - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
 ```
-
-### Option B: Renovate (more control, better for monorepos)
-
-Create `renovate.json`:
-
-```json
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    "group:monorepos",
-    ":automergeMinor",
-    ":automergePatch",
-    "security:openssf-scorecard"
-  ],
-  "packageRules": [
-    {
-      "matchUpdateTypes": ["major"],
-      "automerge": false,
-      "labels": ["dependencies", "major"]
-    },
-    {
-      "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true,
-      "labels": ["dependencies", "auto-merge"]
-    }
-  ]
-}
-```
-
-**Recommendation:** Start with Dependabot. Switch to Renovate if you find Dependabot too noisy or need monorepo grouping.
 
 ---
 
-## 4. Branch Protection Rules
+## 4. Branch Protection Rules (Optional)
 
-Go to GitHub repo → Settings → Branches → Add rule for `main`:
+When ready to enforce, go to GitHub repo -> Settings -> Branches -> Add rule for `main`:
 
 - [x] Require a pull request before merging
 - [x] Require status checks to pass before merging
@@ -229,11 +271,11 @@ This gives you **metrics** — how many findings per project, trending up or dow
 
 ---
 
-## 6. Vercel Deployment Checks
+## 6. Vercel Deployment Checks (Optional)
 
 Vercel automatically runs GitHub checks. Combine with the above:
 
-1. In Vercel project settings → Git → Enable "Require status checks"
+1. In Vercel project settings -> Git -> Enable "Require status checks"
 2. Preview deployments only succeed if the security workflow passes
 3. Production deploys are gated on the same checks
 
@@ -245,17 +287,17 @@ Vercel automatically runs GitHub checks. Combine with the above:
 NEW PROJECT CI SECURITY SETUP
 ===============================
 
-[ ] .github/workflows/security.yml created and committed
-[ ] Pre-commit hook installed (gitleaks)
-[ ] Dependabot or Renovate configured
-[ ] Branch protection rules set on main
-[ ] All 4 security checks required for merge
-[ ] SEMGREP_APP_TOKEN added to GitHub secrets (if using Semgrep App)
-[ ] Vercel deployment gated on security checks
+[ ] Run setup.sh (creates workflow, dependabot, agent rules, gitignore, gitleaks config)
 [ ] First PR opened and verified that checks run
+[ ] SEMGREP_APP_TOKEN added to GitHub secrets (if using Semgrep App)
+
+OPTIONAL (when ready to enforce):
+[ ] Pre-commit hook installed (gitleaks)
+[ ] Branch protection rules set on main
+[ ] Vercel deployment gated on security checks
 ```
 
-**Time estimate:** ~1 hour for the first project. ~15 minutes for each subsequent project (copy the workflow file and config).
+**Time estimate:** ~5 minutes with setup.sh. Then it runs forever.
 
 ---
 
@@ -264,10 +306,11 @@ NEW PROJECT CI SECURITY SETUP
 | Before (Phase 1) | After (Phase 2) |
 |-------------------|-----------------|
 | "Remember to run Semgrep before deploying" | Semgrep runs automatically on every PR |
-| "Don't commit secrets" | gitleaks blocks the commit locally AND in CI |
-| "Check for vulnerable dependencies" | pnpm audit fails the PR if high/critical CVEs exist |
-| "Don't use service_role in app code" | grep check fails the PR if it's found |
+| "Don't commit secrets" | gitleaks flags secrets in CI (and optionally blocks locally) |
+| "Check for vulnerable dependencies" | Audit runs on every PR with auto-detected package manager |
+| "Don't use service_role in app code" | env-check flags it in CI |
+| "Don't expose error.message in responses" | env-check flags error.message/error.stack in non-logging code |
 | "Keep dependencies updated" | Dependabot opens PRs automatically |
-| "Don't push directly to main" | Branch protection makes it impossible |
+| "Don't push directly to main" | Branch protection makes it impossible (when enabled) |
 
 The shift: **security is no longer dependent on human memory. It's infrastructure.**

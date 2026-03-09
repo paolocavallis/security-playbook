@@ -100,9 +100,11 @@ jobs:
       - name: Run Semgrep
         run: |
           semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>/dev/null || true
-          FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "0")
+          FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "PARSE_ERROR")
           echo "## Semgrep Results" >> $GITHUB_STEP_SUMMARY
-          if [ "$FINDINGS" = "0" ]; then
+          if [ "$FINDINGS" = "PARSE_ERROR" ]; then
+            echo "⚠️ Semgrep scan or result parsing failed — review manually" >> $GITHUB_STEP_SUMMARY
+          elif [ "$FINDINGS" = "0" ]; then
             echo "✅ No security findings" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ Found $FINDINGS security issue(s) — review in PR checks" >> $GITHUB_STEP_SUMMARY

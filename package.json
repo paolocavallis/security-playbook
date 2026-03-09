@@ -1,0 +1,34 @@
+{
+  "name": "@graphite-bi/security-playbook",
+  "version": "1.0.0",
+  "description": "Security playbook for AI-assisted development. One command to set up CI security checks, agent rules, and dependency monitoring on any project.",
+  "bin": {
+    "security-playbook": "./bin/run.js"
+  },
+  "files": [
+    "bin/",
+    "setup.sh",
+    "SECURITY-PLAYBOOK.md",
+    "SECURITY-REVIEW-PROCESS.md",
+    "LESSONS-LEARNED.md",
+    "APPENDIX-MCP-INTEGRATIONS.md",
+    "CI-SECURITY-SETUP.md",
+    "CLAUDE-MD-SECURITY-RULES.md"
+  ],
+  "keywords": [
+    "security",
+    "ai",
+    "vibe-coding",
+    "claude",
+    "codex",
+    "cursor",
+    "semgrep",
+    "ci",
+    "github-actions"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/graphite-bi/security-playbook"
+  }
+}

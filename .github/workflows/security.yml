@@ -8,6 +8,9 @@ name: Security Checks
 # All results are written to BOTH stdout (for CLI/agent visibility via
 # `gh run view --log`) AND $GITHUB_STEP_SUMMARY (for the web UI).
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [main]
@@ -23,6 +26,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         id: gitleaks
         env:
@@ -44,6 +48,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 20
@@ -53,13 +59,13 @@ jobs:
           report "## Dependency Audit Results"
           if [ -f "pnpm-lock.yaml" ]; then
             npm install -g pnpm
-            pnpm install --frozen-lockfile
+            pnpm install --frozen-lockfile --ignore-scripts
             pnpm audit --audit-level=high 2>&1 | tee audit-output.txt || true
           elif [ -f "yarn.lock" ]; then
-            yarn install --frozen-lockfile
+            yarn install --frozen-lockfile --ignore-scripts
             yarn audit --level high 2>&1 | tee audit-output.txt || true
           elif [ -f "package-lock.json" ]; then
-            npm ci
+            npm ci --ignore-scripts
             npm audit --audit-level=high 2>&1 | tee audit-output.txt || true
           else
             report "⚠️ No lockfile found — skipping dependency audit"
@@ -79,9 +85,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     container:
-      image: semgrep/semgrep
+      image: semgrep/semgrep@sha256:50b839b576d76426efd3e5cffda2db0d8c403f53aa76e91d42ccf51485ac336c
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Run Semgrep
         run: |
           report() { echo "$1" | tee -a $GITHUB_STEP_SUMMARY; }
@@ -105,6 +113,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Security environment checks
         run: |

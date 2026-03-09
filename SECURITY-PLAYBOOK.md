@@ -372,6 +372,12 @@ INFRASTRUCTURE
 STATIC ANALYSIS
 [ ] Semgrep scan passes with no critical/high findings
 [ ] Semgrep LLM security skill checked (if AI features changed)
+
+CI REVIEW (do NOT skip — CI is the primary safety net)
+[ ] PR created/updated → wait for CI to finish
+[ ] Check "Security Checks" workflow in PR checks tab
+[ ] Read job summaries for warnings (secrets-scan, dependency-audit, semgrep, env-check)
+[ ] Fix any security warnings before deploying
 ```
 
 ---

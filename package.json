@@ -1,5 +1,5 @@
 {
-  "name": "@graphite-bi/security-playbook",
+  "name": "security-playbook",
   "version": "1.0.0",
   "description": "Security playbook for AI-assisted development. One command to set up CI security checks, agent rules, and dependency monitoring on any project.",
   "bin": {

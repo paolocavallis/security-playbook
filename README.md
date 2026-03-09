@@ -38,7 +38,7 @@ All checks are **advisory** — they flag issues but never block merging or depl
      ▼
 ┌─────────────┐  ┌──────────────────┐  ┌─────────┐  ┌────────────────────┐
 │ Secret Scan │  │ Dependency Audit │  │ Semgrep │  │ Environment Safety │
-│  (gitleaks) │  │ (npm/pnpm/yarn)  │  │ (OWASP) │  │  (.env, secrets)   │
+│  (gitleaks) │  │(npm/pnpm/yarn/bun)│  │ (OWASP) │  │  (.env, secrets)   │
 └──────┬──────┘  └────────┬─────────┘  └────┬────┘  └─────────┬──────────┘
        │                  │                  │                 │
        ▼                  ▼                  ▼                 ▼
@@ -47,9 +47,31 @@ All checks are **advisory** — they flag issues but never block merging or depl
        └──────────────────┴──────────────────┴─────────────────┘
                                   │
                                   ▼
-                    Results in PR job summary
+                    Results in PR job summary + stdout
                     AI agents read & fix warnings
 ```
+
+### CI Hardening
+
+The generated workflow applies security best practices by default:
+
+- **`permissions: contents: read`** — least-privilege token scope
+- **`persist-credentials: false`** — no git credentials left on the runner
+- **`--ignore-scripts`** — prevents untrusted lifecycle scripts during audit installs
+- **Semgrep image pinned by SHA256 digest** — immutable container reference
+- **Action SHAs pinned** — all GitHub Actions referenced by commit hash, not mutable tag
+- **Dual-output** — warnings go to both stdout (for `gh` CLI / AI agents) and `GITHUB_STEP_SUMMARY` (for web UI)
+
+### Package Manager Support
+
+| Manager | Audit | Detection |
+|---------|-------|-----------|
+| npm | `npm audit` | `package-lock.json` |
+| pnpm | `pnpm audit` | `pnpm-lock.yaml` |
+| yarn | `yarn audit` | `yarn.lock` |
+| bun | Not yet available | `bun.lockb` / `bun.lock` (warns with guidance) |
+
+Monorepo projects with lockfiles in subdirectories get an additional warning listing unaudited paths.
 
 ## AI Agent Integration
 
@@ -71,12 +93,16 @@ Every security finding strengthens the system:
 Finding → LESSONS-LEARNED.md → New rule in CLAUDE.md or new CI check → Immune
 ```
 
+## Team Rollout
+
+See [`CI-SECURITY-SETUP.md` → Team Rollout Decisions](CI-SECURITY-SETUP.md#team-rollout-decisions) for questions to resolve before adopting across your team: blocking vs. advisory checks, false positive suppression, monorepo coverage, Bun support, Semgrep digest refresh ownership, and more.
+
 ## Docs
 
 | File | What |
 |------|------|
 | [`SECURITY-PLAYBOOK.md`](SECURITY-PLAYBOOK.md) | Full reference — 10 security domains, 50+ rules |
-| [`CI-SECURITY-SETUP.md`](CI-SECURITY-SETUP.md) | CI workflow details and enforcement options |
+| [`CI-SECURITY-SETUP.md`](CI-SECURITY-SETUP.md) | CI workflow details, enforcement options, team rollout guide |
 | [`SECURITY-REVIEW-PROCESS.md`](SECURITY-REVIEW-PROCESS.md) | Monthly audit process |
 | [`LESSONS-LEARNED.md`](LESSONS-LEARNED.md) | Finding log and feedback loop |
 | [`APPENDIX-MCP-INTEGRATIONS.md`](APPENDIX-MCP-INTEGRATIONS.md) | Rules for Google, Slack, BigQuery, GitHub, AWS |

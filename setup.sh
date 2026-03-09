@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run Semgrep
         run: |
-          semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>&1 || true
+          semgrep scan --config auto --severity ERROR --severity WARNING --json > semgrep-results.json 2>/dev/null || true
           FINDINGS=$(cat semgrep-results.json | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('results',[])))" 2>/dev/null || echo "0")
           echo "## Semgrep Results" >> $GITHUB_STEP_SUMMARY
           if [ "$FINDINGS" = "0" ]; then
@@ -174,7 +174,7 @@ jobs:
           fi
 
           # Check for service_role in app code
-          MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations | grep -v "*.test.*" | grep -v "__tests__" || true)
+          MATCHES=$(grep -r "service_role" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" -l . | grep -v node_modules | grep -v migrations | grep -v supabase/migrations | grep -v '\.test\.' | grep -v "__tests__" || true)
           if [ -n "$MATCHES" ]; then
             echo "⚠️ **Found service_role references in application code:**" >> $GITHUB_STEP_SUMMARY
             echo "$MATCHES" >> $GITHUB_STEP_SUMMARY

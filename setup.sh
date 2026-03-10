@@ -55,7 +55,7 @@ track() {
 }
 
 # ============================================================
-echo -e "${BOLD}[1/8] GitHub Actions: Security Checks${NC}"
+echo -e "${BOLD}[1/9] GitHub Actions: Security Checks${NC}"
 # ============================================================
 
 if write_file ".github/workflows/security.yml"; then
@@ -242,7 +242,7 @@ track ".github/workflows/security.yml"
 fi
 
 # ============================================================
-echo -e "${BOLD}[2/8] Dependabot: Automated Dependency Updates${NC}"
+echo -e "${BOLD}[2/9] Dependabot: Automated Dependency Updates${NC}"
 # ============================================================
 
 if write_file ".github/dependabot.yml"; then
@@ -274,7 +274,7 @@ track ".github/dependabot.yml"
 fi
 
 # ============================================================
-echo -e "${BOLD}[3/8] CLAUDE.md Security Rules${NC}"
+echo -e "${BOLD}[3/9] CLAUDE.md Security Rules${NC}"
 # ============================================================
 
 CLAUDE_DIR=".claude"
@@ -369,7 +369,7 @@ else
 fi
 
 # ============================================================
-echo -e "${BOLD}[4/8] .gitignore Security Entries${NC}"
+echo -e "${BOLD}[4/9] .gitignore Security Entries${NC}"
 # ============================================================
 
 GITIGNORE_ENTRIES=(
@@ -398,7 +398,7 @@ else
 fi
 
 # ============================================================
-echo -e "${BOLD}[5/8] Semgrep Skills${NC}"
+echo -e "${BOLD}[5/9] Semgrep Skills${NC}"
 # ============================================================
 
 if command -v npx &> /dev/null; then
@@ -413,7 +413,7 @@ else
 fi
 
 # ============================================================
-echo -e "${BOLD}[6/8] Gitleaks Config (Optional)${NC}"
+echo -e "${BOLD}[6/9] Gitleaks Config (Optional)${NC}"
 # ============================================================
 
 if write_file ".gitleaks.toml"; then
@@ -438,7 +438,7 @@ track ".gitleaks.toml"
 fi
 
 # ============================================================
-echo -e "${BOLD}[7/8] Multi-Agent Security Rules (Codex, Cursor)${NC}"
+echo -e "${BOLD}[7/9] Multi-Agent Security Rules (Codex, Cursor)${NC}"
 # ============================================================
 
 # Build the shared security rules content (agent-agnostic format)
@@ -546,7 +546,7 @@ else
 fi
 
 # ============================================================
-echo -e "${BOLD}[8/8] CLAUDE.md — CI Review Commands${NC}"
+echo -e "${BOLD}[8/9] CLAUDE.md — CI Review Commands${NC}"
 # ============================================================
 
 # Append Claude-specific CI commands to CLAUDE.md
@@ -574,6 +574,28 @@ else
 fi
 
 # ============================================================
+echo -e "${BOLD}[9/9] REVIEW.md — Claude Code Review Guidelines${NC}"
+# ============================================================
+
+REVIEW_FILE="REVIEW.md"
+REVIEW_MARKER="# Code Review Guidelines"
+
+if [ -f "$REVIEW_FILE" ] && grep -q "$REVIEW_MARKER" "$REVIEW_FILE" 2>/dev/null; then
+  echo -e "  ${YELLOW}EXISTS${NC} $REVIEW_FILE already has review guidelines (skipped)"
+else
+  if [ -f "$REVIEW_FILE" ]; then
+    echo -e "  ${YELLOW}EXISTS${NC} $REVIEW_FILE (appending review guidelines)"
+  fi
+  # Copy REVIEW.md from the playbook directory
+  if [ -f "$PLAYBOOK_DIR/REVIEW.md" ]; then
+    cp "$PLAYBOOK_DIR/REVIEW.md" "$REVIEW_FILE"
+    track "$REVIEW_FILE"
+  else
+    echo -e "  ${YELLOW}SKIPPED${NC} REVIEW.md template not found in playbook directory"
+  fi
+fi
+
+# ============================================================
 echo ""
 echo -e "${BOLD}${GREEN}Setup complete.${NC}"
 echo ""
@@ -597,6 +619,7 @@ echo "  AI agent rules are installed for:"
 echo "    - Claude Code (.claude/CLAUDE.md)"
 echo "    - OpenAI Codex (AGENTS.md)"
 echo "    - Cursor (.cursorrules)"
+echo "    - Claude Code Review (REVIEW.md)"
 echo "  Each agent will follow security rules AND check CI results after PRs."
 echo ""
 echo "  Dependabot will open PRs for vulnerable dependencies automatically."

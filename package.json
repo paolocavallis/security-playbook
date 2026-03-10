@@ -13,7 +13,8 @@
     "LESSONS-LEARNED.md",
     "APPENDIX-MCP-INTEGRATIONS.md",
     "CI-SECURITY-SETUP.md",
-    "CLAUDE-MD-SECURITY-RULES.md"
+    "CLAUDE-MD-SECURITY-RULES.md",
+    "REVIEW.md"
   ],
   "keywords": [
     "security",

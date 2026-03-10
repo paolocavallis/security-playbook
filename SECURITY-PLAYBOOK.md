@@ -41,6 +41,7 @@ No security team required for day-to-day work. The system gets stronger with eve
 | **.claude/CLAUDE.md** | Rules for Claude Code — prevention + CI review prompts | Created by setup.sh |
 | **AGENTS.md** | Rules for OpenAI Codex — same security rules, Codex format | Created by setup.sh |
 | **.cursorrules** | Rules for Cursor — same security rules, Cursor format | Created by setup.sh |
+| **REVIEW.md** | Review guidelines for Claude Code Review — what to check on every PR | Created by setup.sh |
 | **.github/workflows/security.yml** | CI checks that report warnings on every PR — detection | Created by setup.sh |
 | **.github/dependabot.yml** | Auto-updates vulnerable dependencies | Created by setup.sh |
 | **SECURITY-REVIEW-PROCESS.md** | When and how to run reviews — detection | Follow as needed |
@@ -473,7 +474,7 @@ npx skills add semgrep/skills
 |------|---------|------|
 | **Semgrep Skills** | Static analysis + OWASP security rules embedded in AI agent | During development + every PR |
 | **Semgrep CI** (`npx semgrep scan`) | Automated static analysis in CI pipeline | Every PR, blocks on critical/high |
-| Claude Code `/code-review` | AI code review with security focus | Every PR |
+| **Claude Code Review** | AI-powered PR review — catches logic errors, security issues, regressions that pattern scanners miss. Configured via `REVIEW.md`. | Every PR (automated) |
 | `pnpm audit` | Dependency vulnerability scanning | Every install + CI |
 | `gitleaks` | Secret scanning in git history | Pre-commit hook + CI |
 | Vercel Firewall / WAF | Rate limiting, DDoS protection | Always-on in production |

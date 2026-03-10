@@ -17,6 +17,7 @@ Run `setup.sh` once in any project. It generates:
 | `.cursorrules` | Security rules for Cursor |
 | `.gitignore` | Blocks `.env` files from commits |
 | `.gitleaks.toml` | Secret scanner config (reduces false positives) |
+| `REVIEW.md` | Code review guidelines for Claude Code Review |
 | Semgrep Skills | Static analysis knowledge for AI agents |
 
 ---
@@ -110,6 +111,22 @@ For a dashboard of findings across all projects:
 3. Add it as a GitHub Actions secret
 4. Findings appear in the dashboard with trends over time
 
+### Claude Code Review (Recommended)
+
+Claude Code Review is an AI-powered PR review service that analyzes diffs + full codebase context. It catches what pattern-based scanners can't: logic errors, broken edge cases, security issues that require semantic understanding.
+
+**What it does NOT replace:** gitleaks (secret scanning), npm audit (dependency CVEs), Semgrep (pattern matching), env-check (grep-based detection). These are complementary layers.
+
+**Setup:**
+1. An admin enables it in [Claude Code admin settings](https://claude.ai/admin-settings/claude-code)
+2. Install the Claude GitHub App to your org
+3. Select repositories and trigger mode (per-PR or per-push)
+4. Reviews run automatically and post inline PR comments
+
+**Configuration:** The `REVIEW.md` file (created by `setup.sh`) tells Code Review what to check for — auth on API routes, RLS on new tables, error.message leakage, dependency vetting, and more. Customize it for your team's standards.
+
+**Cost:** ~$15-25 per review depending on PR size. Set a spend cap in admin settings.
+
 ### Vercel Deployment Checks
 
 1. In Vercel project settings → Git → Enable "Require status checks"
@@ -129,6 +146,7 @@ NEW PROJECT SETUP
 [ ] SEMGREP_APP_TOKEN added to GitHub secrets (if using Semgrep App)
 
 OPTIONAL (when ready to enforce):
+[ ] Claude Code Review enabled (admin settings → GitHub App)
 [ ] Pre-commit hook installed (gitleaks)
 [ ] Branch protection rules set on main
 [ ] Vercel deployment gated on security checks

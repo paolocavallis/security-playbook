@@ -23,6 +23,7 @@ setup.sh runs in your project
          ├─→ .claude/CLAUDE.md                  Security rules for Claude Code
          ├─→ AGENTS.md                          Security rules for Codex
          ├─→ .cursorrules                       Security rules for Cursor
+         ├─→ REVIEW.md                          Review guidelines for Claude Code Review
          ├─→ .gitignore                         Blocks .env files from commits
          ├─→ .gitleaks.toml                     Secret scanner config
          └─→ Semgrep Skills                     Static analysis for AI agents
@@ -80,6 +81,7 @@ Your AI coding tool automatically follows security rules and reviews CI results:
 | Agent | Reads | What It Does |
 |-------|-------|-------------|
 | Claude Code | `.claude/CLAUDE.md` | Follows rules + runs `gh pr checks` to review CI |
+| Claude Code Review | `REVIEW.md` | AI-powered PR review — catches logic errors, security issues, regressions |
 | Codex | `AGENTS.md` | Follows rules + checks PR job summaries |
 | Cursor | `.cursorrules` | Follows rules + checks PR job summaries |
 
